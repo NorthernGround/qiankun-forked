@@ -5,48 +5,19 @@
 import { execScripts } from 'import-html-entry';
 import { isFunction } from 'lodash';
 import { frameworkConfiguration } from '../../../apis';
-import { qiankunHeadTagName } from '../../../utils';
-import { cachedGlobals } from '../../proxySandbox';
+
 import * as css from '../css';
+
+export const rawHeadAppendChild = HTMLHeadElement.prototype.appendChild;
+const rawHeadRemoveChild = HTMLHeadElement.prototype.removeChild;
+const rawBodyAppendChild = HTMLBodyElement.prototype.appendChild;
+const rawBodyRemoveChild = HTMLBodyElement.prototype.removeChild;
+const rawHeadInsertBefore = HTMLHeadElement.prototype.insertBefore;
+const rawRemoveChild = HTMLElement.prototype.removeChild;
 
 const SCRIPT_TAG_NAME = 'SCRIPT';
 const LINK_TAG_NAME = 'LINK';
 const STYLE_TAG_NAME = 'STYLE';
-
-export const styleElementTargetSymbol = Symbol('target');
-export const styleElementRefNodeNo = Symbol('refNodeNo');
-const overwrittenSymbol = Symbol('qiankun-overwritten');
-
-type DynamicDomMutationTarget = 'head' | 'body';
-
-declare global {
-  interface HTMLLinkElement {
-    [styleElementTargetSymbol]: DynamicDomMutationTarget;
-    [styleElementRefNodeNo]?: Exclude<number, -1>;
-  }
-
-  interface HTMLStyleElement {
-    [styleElementTargetSymbol]: DynamicDomMutationTarget;
-    [styleElementRefNodeNo]?: Exclude<number, -1>;
-  }
-
-  interface Function {
-    [overwrittenSymbol]: boolean;
-  }
-}
-
-export const getAppWrapperHeadElement = (appWrapper: Element | ShadowRoot): Element => {
-  return appWrapper.querySelector(qiankunHeadTagName)!;
-};
-
-export function isExecutableScriptType(script: HTMLScriptElement) {
-  return (
-    !script.type ||
-    ['text/javascript', 'module', 'application/javascript', 'text/ecmascript', 'application/ecmascript'].indexOf(
-      script.type,
-    ) !== -1
-  );
-}
 
 export function isHijackingTag(tagName?: string) {
   return (
@@ -66,34 +37,6 @@ export function isStyledComponentsLike(element: HTMLStyleElement) {
   return (
     !element.textContent &&
     ((element.sheet as CSSStyleSheet)?.cssRules.length || getStyledElementCSSRules(element)?.length)
-  );
-}
-
-const appsCounterMap = new Map<string, { bootstrappingPatchCount: number; mountingPatchCount: number }>();
-
-export function calcAppCount(
-  appName: string,
-  calcType: 'increase' | 'decrease',
-  status: 'bootstrapping' | 'mounting',
-): void {
-  const appCount = appsCounterMap.get(appName) || { bootstrappingPatchCount: 0, mountingPatchCount: 0 };
-  switch (calcType) {
-    case 'increase':
-      appCount[`${status}PatchCount`] += 1;
-      break;
-    case 'decrease':
-      // bootstrap patch just called once but its freer will be called multiple times
-      if (appCount[`${status}PatchCount`] > 0) {
-        appCount[`${status}PatchCount`] -= 1;
-      }
-      break;
-  }
-  appsCounterMap.set(appName, appCount);
-}
-
-export function isAllAppsUnmounted(): boolean {
-  return Array.from(appsCounterMap.entries()).every(
-    ([, { bootstrappingPatchCount: bpc, mountingPatchCount: mpc }]) => bpc === 0 && mpc === 0,
   );
 }
 
@@ -159,15 +102,6 @@ function convertLinkAsStyle(
   return styleElement;
 }
 
-const defineNonEnumerableProperty = (target: any, key: string | symbol, value: any) => {
-  Object.defineProperty(target, key, {
-    configurable: true,
-    enumerable: false,
-    writable: true,
-    value,
-  });
-};
-
 const styledComponentCSSRulesMap = new WeakMap<HTMLStyleElement, CSSRuleList>();
 const dynamicScriptAttachedCommentMap = new WeakMap<HTMLScriptElement, Comment>();
 const dynamicLinkAttachedInlineStyleMap = new WeakMap<HTMLLinkElement, HTMLStyleElement>();
@@ -196,8 +130,7 @@ export type ContainerConfig = {
   appName: string;
   proxy: WindowProxy;
   strictGlobal: boolean;
-  speedySandbox: boolean;
-  dynamicStyleSheetElements: Array<HTMLStyleElement | HTMLLinkElement>;
+  dynamicStyleSheetElements: HTMLStyleElement[];
   appWrapperGetter: CallableFunction;
   scopedCSS: boolean;
   excludeAssetFilter?: CallableFunction;
@@ -207,15 +140,14 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
   rawDOMAppendOrInsertBefore: <T extends Node>(newChild: T, refChild?: Node | null) => T;
   isInvokedByMicroApp: (element: HTMLElement) => boolean;
   containerConfigGetter: (element: HTMLElement) => ContainerConfig;
-  target: DynamicDomMutationTarget;
 }) {
-  function appendChildOrInsertBefore<T extends Node>(
+  return function appendChildOrInsertBefore<T extends Node>(
     this: HTMLHeadElement | HTMLBodyElement,
     newChild: T,
-    refChild: Node | null = null,
+    refChild?: Node | null,
   ) {
     let element = newChild as any;
-    const { rawDOMAppendOrInsertBefore, isInvokedByMicroApp, containerConfigGetter, target = 'body' } = opts;
+    const { rawDOMAppendOrInsertBefore, isInvokedByMicroApp, containerConfigGetter } = opts;
     if (!isHijackingTag(element.tagName) || !isInvokedByMicroApp(element)) {
       return rawDOMAppendOrInsertBefore.call(this, element, refChild) as T;
     }
@@ -227,7 +159,6 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
         appWrapperGetter,
         proxy,
         strictGlobal,
-        speedySandbox,
         dynamicStyleSheetElements,
         scopedCSS,
         excludeAssetFilter,
@@ -242,9 +173,7 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
             return rawDOMAppendOrInsertBefore.call(this, element, refChild) as T;
           }
 
-          defineNonEnumerableProperty(stylesheetElement, styleElementTargetSymbol, target);
-
-          const appWrapper = appWrapperGetter();
+          const mountDOM = appWrapperGetter();
 
           if (scopedCSS) {
             // exclude link elements like <link rel="icon" href="favicon.ico">
@@ -259,57 +188,36 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
                   : frameworkConfiguration.fetch?.fn;
               stylesheetElement = convertLinkAsStyle(
                 element,
-                (styleElement) => css.process(appWrapper, styleElement, appName),
+                (styleElement) => css.process(mountDOM, styleElement, appName),
                 fetch,
               );
               dynamicLinkAttachedInlineStyleMap.set(element, stylesheetElement);
             } else {
-              css.process(appWrapper, stylesheetElement, appName);
+              css.process(mountDOM, stylesheetElement, appName);
             }
           }
 
-          const mountDOM = target === 'head' ? getAppWrapperHeadElement(appWrapper) : appWrapper;
-
-          const referenceNode = mountDOM.contains(refChild) ? refChild : null;
-
-          let refNo: number | undefined;
-          if (referenceNode) {
-            refNo = Array.from(mountDOM.childNodes).indexOf(referenceNode);
-          }
-
-          const result = rawDOMAppendOrInsertBefore.call(mountDOM, stylesheetElement, referenceNode);
-
-          // record refNo thus we can keep order while remounting
-          if (typeof refNo === 'number' && refNo !== -1) {
-            defineNonEnumerableProperty(stylesheetElement, styleElementRefNodeNo, refNo);
-          }
-          // record dynamic style elements after insert succeed
+          // eslint-disable-next-line no-shadow
           dynamicStyleSheetElements.push(stylesheetElement);
-
-          return result as T;
+          const referenceNode = mountDOM.contains(refChild) ? refChild : null;
+          return rawDOMAppendOrInsertBefore.call(mountDOM, stylesheetElement, referenceNode);
         }
 
         case SCRIPT_TAG_NAME: {
           const { src, text } = element as HTMLScriptElement;
-          // some script like jsonp maybe not support cors which shouldn't use execScripts
-          if ((excludeAssetFilter && src && excludeAssetFilter(src)) || !isExecutableScriptType(element)) {
+          // some script like jsonp maybe not support cors which should't use execScripts
+          if (excludeAssetFilter && src && excludeAssetFilter(src)) {
             return rawDOMAppendOrInsertBefore.call(this, element, refChild) as T;
           }
 
-          const appWrapper = appWrapperGetter();
-          const mountDOM = target === 'head' ? getAppWrapperHeadElement(appWrapper) : appWrapper;
-
+          const mountDOM = appWrapperGetter();
           const { fetch } = frameworkConfiguration;
           const referenceNode = mountDOM.contains(refChild) ? refChild : null;
 
-          const scopedGlobalVariables = speedySandbox ? cachedGlobals : [];
-
           if (src) {
-            let isRedfinedCurrentScript = false;
             execScripts(null, [src], proxy, {
               fetch,
               strictGlobal,
-              scopedGlobalVariables,
               beforeExec: () => {
                 const isCurrentScriptConfigurable = () => {
                   const descriptor = Object.getOwnPropertyDescriptor(document, 'currentScript');
@@ -322,23 +230,14 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
                     },
                     configurable: true,
                   });
-                  isRedfinedCurrentScript = true;
                 }
               },
               success: () => {
                 manualInvokeElementOnLoad(element);
-                if (isRedfinedCurrentScript) {
-                  // @ts-ignore
-                  delete document.currentScript;
-                }
                 element = null;
               },
               error: () => {
                 manualInvokeElementOnError(element);
-                if (isRedfinedCurrentScript) {
-                  // @ts-ignore
-                  delete document.currentScript;
-                }
                 element = null;
               },
             });
@@ -349,7 +248,7 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
           }
 
           // inline script never trigger the onload and onerror event
-          execScripts(null, [`<script>${text}</script>`], proxy, { strictGlobal, scopedGlobalVariables });
+          execScripts(null, [`<script>${text}</script>`], proxy, { strictGlobal });
           const dynamicInlineScriptCommentElement = document.createComment('dynamic inline script replaced by qiankun');
           dynamicScriptAttachedCommentMap.set(element, dynamicInlineScriptCommentElement);
           return rawDOMAppendOrInsertBefore.call(mountDOM, dynamicInlineScriptCommentElement, referenceNode);
@@ -361,43 +260,27 @@ function getOverwrittenAppendChildOrInsertBefore(opts: {
     }
 
     return rawDOMAppendOrInsertBefore.call(this, element, refChild);
-  }
-
-  appendChildOrInsertBefore[overwrittenSymbol] = true;
-
-  return appendChildOrInsertBefore;
+  };
 }
 
 function getNewRemoveChild(
-  rawRemoveChild: typeof HTMLElement.prototype.removeChild,
-  containerConfigGetter: (element: HTMLElement) => ContainerConfig,
-  target: DynamicDomMutationTarget,
-  isInvokedByMicroApp: (element: HTMLElement) => boolean,
+  headOrBodyRemoveChild: typeof HTMLElement.prototype.removeChild,
+  appWrapperGetterGetter: (element: HTMLElement) => ContainerConfig['appWrapperGetter'],
 ) {
-  function removeChild<T extends Node>(this: HTMLHeadElement | HTMLBodyElement, child: T) {
+  return function removeChild<T extends Node>(this: HTMLHeadElement | HTMLBodyElement, child: T) {
     const { tagName } = child as any;
-    if (!isHijackingTag(tagName) || !isInvokedByMicroApp(child as any)) return rawRemoveChild.call(this, child) as T;
+    if (!isHijackingTag(tagName)) return headOrBodyRemoveChild.call(this, child) as T;
 
     try {
       let attachedElement: Node;
-      const { appWrapperGetter, dynamicStyleSheetElements } = containerConfigGetter(child as any);
-
       switch (tagName) {
-        case STYLE_TAG_NAME:
         case LINK_TAG_NAME: {
-          attachedElement = dynamicLinkAttachedInlineStyleMap.get(child as any) || child;
-
-          // try to remove the dynamic style sheet
-          const dynamicElementIndex = dynamicStyleSheetElements.indexOf(attachedElement as HTMLLinkElement);
-          if (dynamicElementIndex !== -1) {
-            dynamicStyleSheetElements.splice(dynamicElementIndex, 1);
-          }
-
+          attachedElement = (dynamicLinkAttachedInlineStyleMap.get(child as any) as Node) || child;
           break;
         }
 
         case SCRIPT_TAG_NAME: {
-          attachedElement = dynamicScriptAttachedCommentMap.get(child as any) || child;
+          attachedElement = (dynamicScriptAttachedCommentMap.get(child as any) as Node) || child;
           break;
         }
 
@@ -406,73 +289,60 @@ function getNewRemoveChild(
         }
       }
 
-      const appWrapper = appWrapperGetter();
-      const container = target === 'head' ? getAppWrapperHeadElement(appWrapper) : appWrapper;
-      // container might have been removed while app unmounting if the removeChild action was async
+      // container may had been removed while app unmounting if the removeChild action was async
+      const appWrapperGetter = appWrapperGetterGetter(child as any);
+      const container = appWrapperGetter();
       if (container.contains(attachedElement)) {
-        return rawRemoveChild.call(attachedElement.parentNode, attachedElement) as T;
+        return rawRemoveChild.call(container, attachedElement) as T;
       }
     } catch (e) {
       console.warn(e);
     }
 
-    return rawRemoveChild.call(this, child) as T;
-  }
-
-  removeChild[overwrittenSymbol] = true;
-  return removeChild;
+    return headOrBodyRemoveChild.call(this, child) as T;
+  };
 }
 
 export function patchHTMLDynamicAppendPrototypeFunctions(
   isInvokedByMicroApp: (element: HTMLElement) => boolean,
   containerConfigGetter: (element: HTMLElement) => ContainerConfig,
 ) {
-  const rawHeadAppendChild = HTMLHeadElement.prototype.appendChild;
-  const rawBodyAppendChild = HTMLBodyElement.prototype.appendChild;
-  const rawHeadInsertBefore = HTMLHeadElement.prototype.insertBefore;
-
-  // Just overwrite it while it have not been overwritten
+  // Just overwrite it while it have not been overwrite
   if (
-    rawHeadAppendChild[overwrittenSymbol] !== true &&
-    rawBodyAppendChild[overwrittenSymbol] !== true &&
-    rawHeadInsertBefore[overwrittenSymbol] !== true
+    HTMLHeadElement.prototype.appendChild === rawHeadAppendChild &&
+    HTMLBodyElement.prototype.appendChild === rawBodyAppendChild &&
+    HTMLHeadElement.prototype.insertBefore === rawHeadInsertBefore
   ) {
     HTMLHeadElement.prototype.appendChild = getOverwrittenAppendChildOrInsertBefore({
       rawDOMAppendOrInsertBefore: rawHeadAppendChild,
       containerConfigGetter,
       isInvokedByMicroApp,
-      target: 'head',
     }) as typeof rawHeadAppendChild;
     HTMLBodyElement.prototype.appendChild = getOverwrittenAppendChildOrInsertBefore({
       rawDOMAppendOrInsertBefore: rawBodyAppendChild,
       containerConfigGetter,
       isInvokedByMicroApp,
-      target: 'body',
     }) as typeof rawBodyAppendChild;
 
     HTMLHeadElement.prototype.insertBefore = getOverwrittenAppendChildOrInsertBefore({
       rawDOMAppendOrInsertBefore: rawHeadInsertBefore as any,
       containerConfigGetter,
       isInvokedByMicroApp,
-      target: 'head',
     }) as typeof rawHeadInsertBefore;
   }
 
-  const rawHeadRemoveChild = HTMLHeadElement.prototype.removeChild;
-  const rawBodyRemoveChild = HTMLBodyElement.prototype.removeChild;
-  // Just overwrite it while it have not been overwritten
-  if (rawHeadRemoveChild[overwrittenSymbol] !== true && rawBodyRemoveChild[overwrittenSymbol] !== true) {
+  // Just overwrite it while it have not been overwrite
+  if (
+    HTMLHeadElement.prototype.removeChild === rawHeadRemoveChild &&
+    HTMLBodyElement.prototype.removeChild === rawBodyRemoveChild
+  ) {
     HTMLHeadElement.prototype.removeChild = getNewRemoveChild(
       rawHeadRemoveChild,
-      containerConfigGetter,
-      'head',
-      isInvokedByMicroApp,
+      (element) => containerConfigGetter(element).appWrapperGetter,
     );
     HTMLBodyElement.prototype.removeChild = getNewRemoveChild(
       rawBodyRemoveChild,
-      containerConfigGetter,
-      'body',
-      isInvokedByMicroApp,
+      (element) => containerConfigGetter(element).appWrapperGetter,
     );
   }
 

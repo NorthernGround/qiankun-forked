@@ -41,10 +41,6 @@ export class ScopedCSS {
   }
 
   process(styleNode: HTMLStyleElement, prefix: string = '') {
-    if (ScopedCSS.ModifiedTag in styleNode) {
-      return;
-    }
-
     if (styleNode.textContent !== '') {
       const textNode = document.createTextNode(styleNode.textContent || '');
       this.swapNode.appendChild(textNode);
@@ -56,7 +52,6 @@ export class ScopedCSS {
 
       // cleanup
       this.swapNode.removeChild(textNode);
-      (styleNode as any)[ScopedCSS.ModifiedTag] = true;
       return;
     }
 
@@ -102,10 +97,7 @@ export class ScopedCSS {
           css += this.ruleSupport(rule as CSSSupportsRule, prefix);
           break;
         default:
-          if (typeof rule.cssText === 'string') {
-            css += `${rule.cssText}`;
-          }
-
+          css += `${rule.cssText}`;
           break;
       }
     });
@@ -124,11 +116,7 @@ export class ScopedCSS {
 
     const selector = rule.selectorText.trim();
 
-    let cssText = '';
-    if (typeof rule.cssText === 'string') {
-      cssText = rule.cssText;
-    }
-
+    let { cssText } = rule;
     // handle html { ... }
     // handle body { ... }
     // handle :root { ... }
@@ -177,14 +165,14 @@ export class ScopedCSS {
   // @media screen and (max-width: 300px) {}
   private ruleMedia(rule: CSSMediaRule, prefix: string) {
     const css = this.rewrite(arrayify(rule.cssRules), prefix);
-    return `@media ${rule.conditionText || rule.media.mediaText} {${css}}`;
+    return `@media ${rule.conditionText} {${css}}`;
   }
 
   // handle case:
   // @supports (display: grid) {}
   private ruleSupport(rule: CSSSupportsRule, prefix: string) {
     const css = this.rewrite(arrayify(rule.cssRules), prefix);
-    return `@supports ${rule.conditionText || rule.cssText.split('{')[0]} {${css}}`;
+    return `@supports ${rule.conditionText} {${css}}`;
   }
 }
 

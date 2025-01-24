@@ -112,7 +112,6 @@ start();
      ReactDOM.unmountComponentAtNode(container ? container.querySelector('#root') : document.querySelector('#root'));
    }
    ```
-这里需要特别注意的是，通过 ReactDOM.render 挂载子应用时，需要保证每次子应用加载都应使用一个新的路由实例。
 
 4. 修改 `webpack` 配置
 
@@ -131,8 +130,7 @@ start();
      webpack: (config) => {
        config.output.library = `${name}-[name]`;
        config.output.libraryTarget = 'umd';
-       // webpack 5 需要把 jsonpFunction 替换成 chunkLoadingGlobal
-       config.output.jsonpFunction = `webpackJsonp_${name}`; 
+       config.output.jsonpFunction = `webpackJsonp_${name}`;
        config.output.globalObject = 'window';
 
        return config;
@@ -241,7 +239,7 @@ start();
        output: {
          library: `${name}-[name]`,
          libraryTarget: 'umd', // 把微应用打包成 umd 库格式
-         jsonpFunction: `webpackJsonp_${name}`, // webpack 5 需要把 jsonpFunction 替换成 chunkLoadingGlobal
+         jsonpFunction: `webpackJsonp_${name}`,
        },
      },
    };
@@ -332,7 +330,7 @@ start();
      output: {
        library: `${appName}-[name]`,
        libraryTarget: 'umd',
-       jsonpFunction: `webpackJsonp_${appName}`, // webpack 5 需要把 jsonpFunction 替换成 chunkLoadingGlobal
+       jsonpFunction: `webpackJsonp_${appName}`,
      },
    };
    ```

@@ -3,7 +3,7 @@
  * @since 2020-04-10
  */
 
-import { getMicroAppStateActions, initGlobalState } from '../globalState';
+import { initGlobalState, getMicroAppStateActions } from '../globalState';
 
 const master = initGlobalState({ user: 'qiankun' });
 

@@ -2,9 +2,9 @@
  * @author Kuitos
  * @since 2019-05-15
  */
-import { isFunction, memoize, once, snakeCase } from 'lodash';
+
+import { isFunction, snakeCase } from 'lodash';
 import type { FrameworkConfiguration } from './interfaces';
-import { version } from './version';
 
 export function toArray<T>(array: T | T[]): T[] {
   return Array.isArray(array) ? array : [array];
@@ -15,14 +15,10 @@ export function sleep(ms: number) {
 }
 
 // Promise.then might be synchronized in Zone.js context, we need to use setTimeout instead to mock next tick.
-// Since zone.js will hijack the setTimeout callback, and notify angular to do change detection, so we need to use the  __zone_symbol__setTimeout to avoid this, see https://github.com/umijs/qiankun/issues/2384
 const nextTick: (cb: () => void) => void =
-  typeof window.__zone_symbol__setTimeout === 'function'
-    ? window.__zone_symbol__setTimeout
-    : (cb) => Promise.resolve().then(cb);
+  typeof window.Zone === 'function' ? setTimeout : (cb) => Promise.resolve().then(cb);
 
 let globalTaskPending = false;
-
 /**
  * Run a callback before next task executing, and the invocation is idempotent in every singular task
  * That means even we called nextTask multi times in one task, only the first callback will be pushed to nextTick to be invoked.
@@ -39,7 +35,6 @@ export function nextTask(cb: () => void): void {
 }
 
 const fnRegexCheckCacheMap = new WeakMap<any | FunctionConstructor, boolean>();
-
 export function isConstructable(fn: () => any | FunctionConstructor) {
   // prototype methods might be changed while code running, so we need check it every time
   const hasPrototypeMethods =
@@ -70,51 +65,27 @@ export function isConstructable(fn: () => any | FunctionConstructor) {
   return constructable;
 }
 
+/**
+ * in safari
+ * typeof document.all === 'undefined' // true
+ * typeof document.all === 'function' // true
+ * We need to discriminate safari for better performance
+ */
+const naughtySafari = typeof document.all === 'function' && typeof document.all === 'undefined';
 const callableFnCacheMap = new WeakMap<CallableFunction, boolean>();
-export function isCallable(fn: any): boolean {
+export const isCallable = (fn: any) => {
   if (callableFnCacheMap.has(fn)) {
     return true;
   }
 
-  /**
-   * We can not use typeof to confirm it is function as in some safari version
-   * typeof document.all === 'undefined' // true
-   * typeof document.all === 'function' // true
-   */
-  const callable = typeof fn === 'function' && fn instanceof Function;
+  const callable = naughtySafari ? typeof fn === 'function' && typeof fn !== 'undefined' : typeof fn === 'function';
   if (callable) {
     callableFnCacheMap.set(fn, callable);
   }
   return callable;
-}
-
-const frozenPropertyCacheMap = new WeakMap<any, Record<PropertyKey, boolean>>();
-export function isPropertyFrozen(target: any, p?: PropertyKey): boolean {
-  if (!target || !p) {
-    return false;
-  }
-
-  const targetPropertiesFromCache = frozenPropertyCacheMap.get(target) || {};
-
-  if (targetPropertiesFromCache[p]) {
-    return targetPropertiesFromCache[p];
-  }
-
-  const propertyDescriptor = Object.getOwnPropertyDescriptor(target, p);
-  const frozen = Boolean(
-    propertyDescriptor &&
-      propertyDescriptor.configurable === false &&
-      (propertyDescriptor.writable === false || (propertyDescriptor.get && !propertyDescriptor.set)),
-  );
-
-  targetPropertiesFromCache[p] = frozen;
-  frozenPropertyCacheMap.set(target, targetPropertiesFromCache);
-
-  return frozen;
-}
+};
 
 const boundedMap = new WeakMap<CallableFunction, boolean>();
-
 export function isBoundedFunction(fn: CallableFunction) {
   if (boundedMap.has(fn)) {
     return boundedMap.get(fn);
@@ -128,73 +99,13 @@ export function isBoundedFunction(fn: CallableFunction) {
   return bounded;
 }
 
-export const isConstDestructAssignmentSupported = memoize(() => {
-  try {
-    new Function('const { a } = { a: 1 }')();
-    return true;
-  } catch (e) {
-    return false;
-  }
-});
-
-export const qiankunHeadTagName = 'qiankun-head';
-
-export function getDefaultTplWrapper(name: string, sandboxOpts: FrameworkConfiguration['sandbox']) {
-  return (tpl: string) => {
-    let tplWithSimulatedHead: string;
-
-    if (tpl.indexOf('<head>') !== -1) {
-      // We need to mock a head placeholder as native head element will be erased by browser in micro app
-      tplWithSimulatedHead = tpl
-        .replace('<head>', `<${qiankunHeadTagName}>`)
-        .replace('</head>', `</${qiankunHeadTagName}>`);
-    } else {
-      // Some template might not be a standard html document, thus we need to add a simulated head tag for them
-      tplWithSimulatedHead = `<${qiankunHeadTagName}></${qiankunHeadTagName}>${tpl}`;
-    }
-
-    return `<div id="${getWrapperId(
-      name,
-    )}" data-name="${name}" data-version="${version}" data-sandbox-cfg=${JSON.stringify(
-      sandboxOpts,
-    )}>${tplWithSimulatedHead}</div>`;
-  };
+export function getDefaultTplWrapper(id: string, name: string) {
+  return (tpl: string) => `<div id="${getWrapperId(id)}" data-name="${name}">${tpl}</div>`;
 }
 
-export function getWrapperId(name: string) {
-  return `__qiankun_microapp_wrapper_for_${snakeCase(name)}__`;
+export function getWrapperId(id: string) {
+  return `__qiankun_microapp_wrapper_for_${snakeCase(id)}__`;
 }
-
-export const nativeGlobal = new Function('return this')();
-
-export const nativeDocument = new Function('return document')();
-
-const getGlobalAppInstanceMap = once<() => Record<string, number>>(() => {
-  if (!nativeGlobal.hasOwnProperty('__app_instance_name_map__')) {
-    Object.defineProperty(nativeGlobal, '__app_instance_name_map__', {
-      enumerable: false,
-      configurable: true,
-      writable: true,
-      value: {},
-    });
-  }
-
-  return nativeGlobal.__app_instance_name_map__;
-});
-/**
- * Get app instance name with the auto-increment approach
- * @param appName
- */
-export const genAppInstanceIdByName = (appName: string): string => {
-  const globalAppInstanceMap = getGlobalAppInstanceMap();
-  if (!(appName in globalAppInstanceMap)) {
-    nativeGlobal.__app_instance_name_map__[appName] = 0;
-    return appName;
-  }
-
-  globalAppInstanceMap[appName]++;
-  return `${appName}_${globalAppInstanceMap[appName]}`;
-};
 
 /** 校验子应用导出的 生命周期 对象是否正确 */
 export function validateExportLifecycle(exports: any) {
@@ -202,7 +113,7 @@ export function validateExportLifecycle(exports: any) {
   return isFunction(bootstrap) && isFunction(mount) && isFunction(unmount);
 }
 
-export class Deferred<T> {
+class Deferred<T> {
   promise: Promise<T>;
 
   resolve!: (value: T | PromiseLike<T>) => void;
@@ -216,6 +127,8 @@ export class Deferred<T> {
     });
   }
 }
+
+export { Deferred };
 
 const supportsUserTiming =
   typeof performance !== 'undefined' &&
@@ -286,12 +199,16 @@ export function getXPathForElement(el: Node, document: Document): string | void 
       tmpEle = tmpEle.previousSibling;
     }
 
-    xpath = `*[name()='${element.nodeName}'][${pos}]/${xpath}`;
+    xpath = `*[name()='${element.nodeName}' and namespace-uri()='${
+      element.namespaceURI === null ? '' : element.namespaceURI
+    }'][${pos}]/${xpath}`;
 
     element = element.parentNode!;
   }
 
-  xpath = `/*[name()='${document.documentElement.nodeName}']/${xpath}`;
+  xpath = `/*[name()='${document.documentElement.nodeName}' and namespace-uri()='${
+    element.namespaceURI === null ? '' : element.namespaceURI
+  }']/${xpath}`;
   xpath = xpath.replace(/\/$/, '');
 
   return xpath;
@@ -299,15 +216,4 @@ export function getXPathForElement(el: Node, document: Document): string | void 
 
 export function getContainer(container: string | HTMLElement): HTMLElement | null {
   return typeof container === 'string' ? document.querySelector(container) : container;
-}
-
-export function getContainerXPath(container?: string | HTMLElement): string | void {
-  if (container) {
-    const containerElement = getContainer(container);
-    if (containerElement) {
-      return getXPathForElement(containerElement, document);
-    }
-  }
-
-  return undefined;
 }

@@ -18,17 +18,15 @@ import type {
   ObjectType,
 } from './interfaces';
 import { createSandboxContainer, css } from './sandbox';
-import { cachedGlobals } from './sandbox/proxySandbox';
 import {
   Deferred,
-  genAppInstanceIdByName,
   getContainer,
   getDefaultTplWrapper,
   getWrapperId,
   isEnableScopedCSS,
-  performanceGetEntriesByName,
   performanceMark,
   performanceMeasure,
+  performanceGetEntriesByName,
   toArray,
   validateExportLifecycle,
 } from './utils';
@@ -62,13 +60,14 @@ async function validateSingularMode<T extends ObjectType>(
   return typeof validate === 'function' ? validate(app) : !!validate;
 }
 
-const supportShadowDOM = !!document.head.attachShadow || !!(document.head as any).createShadowRoot;
+// @ts-ignore
+const supportShadowDOM = document.head.attachShadow || document.head.createShadowRoot;
 
 function createElement(
   appContent: string,
   strictStyleIsolation: boolean,
   scopedCSS: boolean,
-  appInstanceId: string,
+  appName: string,
 ): HTMLElement {
   const containerElement = document.createElement('div');
   containerElement.innerHTML = appContent;
@@ -97,12 +96,12 @@ function createElement(
   if (scopedCSS) {
     const attr = appElement.getAttribute(css.QiankunCSSRewriteAttr);
     if (!attr) {
-      appElement.setAttribute(css.QiankunCSSRewriteAttr, appInstanceId);
+      appElement.setAttribute(css.QiankunCSSRewriteAttr, appName);
     }
 
     const styleNodes = appElement.querySelectorAll('style') || [];
     forEach(styleNodes, (stylesheetElement: HTMLStyleElement) => {
-      css.process(appElement!, stylesheetElement, appInstanceId);
+      css.process(appElement!, stylesheetElement, appName);
     });
   }
 
@@ -111,6 +110,7 @@ function createElement(
 
 /** generate app wrapper dom getter */
 function getAppWrapperGetter(
+  appName: string,
   appInstanceId: string,
   useLegacyRender: boolean,
   strictStyleIsolation: boolean,
@@ -123,12 +123,12 @@ function getAppWrapperGetter(
       if (scopedCSS) throw new QiankunError('experimentalStyleIsolation can not be used with legacy render!');
 
       const appWrapper = document.getElementById(getWrapperId(appInstanceId));
-      assertElementExist(appWrapper, `Wrapper element for ${appInstanceId} is not existed!`);
+      assertElementExist(appWrapper, `Wrapper element for ${appName} with instance ${appInstanceId} is not existed!`);
       return appWrapper!;
     }
 
     const element = elementGetter();
-    assertElementExist(element, `Wrapper element for ${appInstanceId} is not existed!`);
+    assertElementExist(element, `Wrapper element for ${appName} with instance ${appInstanceId} is not existed!`);
 
     if (strictStyleIsolation && supportShadowDOM) {
       return element!.shadowRoot!;
@@ -148,16 +148,16 @@ type ElementRender = (
 /**
  * Get the render function
  * If the legacy render function is provide, used as it, otherwise we will insert the app element to target container by qiankun
- * @param appInstanceId
+ * @param appName
  * @param appContent
  * @param legacyRender
  */
-function getRender(appInstanceId: string, appContent: string, legacyRender?: HTMLContentRender) {
+function getRender(appName: string, appContent: string, legacyRender?: HTMLContentRender) {
   const render: ElementRender = ({ element, loading, container }, phase) => {
     if (legacyRender) {
       if (process.env.NODE_ENV === 'development') {
-        console.error(
-          '[qiankun] Custom rendering function is deprecated and will be removed in 3.0, you can use the container element setting instead!',
+        console.warn(
+          '[qiankun] Custom rendering function is deprecated, you can use the container element setting instead!',
         );
       }
 
@@ -173,13 +173,13 @@ function getRender(appInstanceId: string, appContent: string, legacyRender?: HTM
         switch (phase) {
           case 'loading':
           case 'mounting':
-            return `Target container with ${container} not existed while ${appInstanceId} ${phase}!`;
+            return `Target container with ${container} not existed while ${appName} ${phase}!`;
 
           case 'mounted':
-            return `Target container with ${container} not existed after ${appInstanceId} ${phase}!`;
+            return `Target container with ${container} not existed after ${appName} ${phase}!`;
 
           default:
-            return `Target container with ${container} not existed while ${appInstanceId} rendering!`;
+            return `Target container with ${container} not existed while ${appName} rendering!`;
         }
       })();
       assertElementExist(containerElement, errorMsg);
@@ -247,25 +247,17 @@ export async function loadApp<T extends ObjectType>(
   lifeCycles?: FrameworkLifeCycles<T>,
 ): Promise<ParcelConfigObjectGetter> {
   const { entry, name: appName } = app;
-  const appInstanceId = genAppInstanceIdByName(appName);
+  const appInstanceId = `${appName}_${+new Date()}_${Math.floor(Math.random() * 1000)}`;
 
   const markName = `[qiankun] App ${appInstanceId} Loading`;
   if (process.env.NODE_ENV === 'development') {
     performanceMark(markName);
   }
 
-  const {
-    singular = false,
-    sandbox = true,
-    excludeAssetFilter,
-    globalContext = window,
-    ...importEntryOpts
-  } = configuration;
+  const { singular = false, sandbox = true, excludeAssetFilter, ...importEntryOpts } = configuration;
 
   // get the entry html content and script executor
-  const { template, execScripts, assetPublicPath, getExternalScripts } = await importEntry(entry, importEntryOpts);
-  // trigger external scripts loading to make sure all assets are ready before execScripts calling
-  await getExternalScripts();
+  const { template, execScripts, assetPublicPath } = await importEntry(entry, importEntryOpts);
 
   // as single-spa load and bootstrap new app parallel with other apps unmounting
   // (see https://github.com/CanopyTax/single-spa/blob/master/src/navigation/reroute.js#L74)
@@ -274,34 +266,28 @@ export async function loadApp<T extends ObjectType>(
     await (prevAppUnmountedDeferred && prevAppUnmountedDeferred.promise);
   }
 
-  const appContent = getDefaultTplWrapper(appInstanceId, sandbox)(template);
+  const appContent = getDefaultTplWrapper(appInstanceId, appName)(template);
 
   const strictStyleIsolation = typeof sandbox === 'object' && !!sandbox.strictStyleIsolation;
-
-  if (process.env.NODE_ENV === 'development' && strictStyleIsolation) {
-    console.warn(
-      "[qiankun] strictStyleIsolation configuration will be removed in 3.0, pls don't depend on it or use experimentalStyleIsolation instead!",
-    );
-  }
-
   const scopedCSS = isEnableScopedCSS(sandbox);
   let initialAppWrapperElement: HTMLElement | null = createElement(
     appContent,
     strictStyleIsolation,
     scopedCSS,
-    appInstanceId,
+    appName,
   );
 
   const initialContainer = 'container' in app ? app.container : undefined;
   const legacyRender = 'render' in app ? app.render : undefined;
 
-  const render = getRender(appInstanceId, appContent, legacyRender);
+  const render = getRender(appName, appContent, legacyRender);
 
   // 第一次加载设置应用可见区域 dom 结构
   // 确保每次应用加载前容器 dom 结构已经设置完毕
   render({ element: initialAppWrapperElement, loading: true, container: initialContainer }, 'loading');
 
   const initialAppWrapperGetter = getAppWrapperGetter(
+    appName,
     appInstanceId,
     !!legacyRender,
     strictStyleIsolation,
@@ -309,23 +295,19 @@ export async function loadApp<T extends ObjectType>(
     () => initialAppWrapperElement,
   );
 
-  let global = globalContext;
+  let global = window;
   let mountSandbox = () => Promise.resolve();
   let unmountSandbox = () => Promise.resolve();
   const useLooseSandbox = typeof sandbox === 'object' && !!sandbox.loose;
-  // enable speedy mode by default
-  const speedySandbox = typeof sandbox === 'object' ? sandbox.speedy !== false : true;
   let sandboxContainer;
   if (sandbox) {
     sandboxContainer = createSandboxContainer(
-      appInstanceId,
+      appName,
       // FIXME should use a strict sandbox logic while remount, see https://github.com/umijs/qiankun/issues/518
       initialAppWrapperGetter,
       scopedCSS,
       useLooseSandbox,
       excludeAssetFilter,
-      global,
-      speedySandbox,
     );
     // 用沙箱的代理对象作为接下来使用的全局对象
     global = sandboxContainer.instance.proxy as typeof window;
@@ -344,9 +326,7 @@ export async function loadApp<T extends ObjectType>(
   await execHooksChain(toArray(beforeLoad), app, global);
 
   // get the lifecycle hooks from module exports
-  const scriptExports: any = await execScripts(global, sandbox && !useLooseSandbox, {
-    scopedGlobalVariables: speedySandbox ? cachedGlobals : [],
-  });
+  const scriptExports: any = await execScripts(global, sandbox && !useLooseSandbox);
   const { bootstrap, mount, unmount, update } = getLifecyclesFromExports(
     scriptExports,
     appName,
@@ -388,6 +368,7 @@ export async function loadApp<T extends ObjectType>(
         async () => {
           appWrapperElement = initialAppWrapperElement;
           appWrapperGetter = getAppWrapperGetter(
+            appName,
             appInstanceId,
             !!legacyRender,
             strictStyleIsolation,
@@ -401,7 +382,7 @@ export async function loadApp<T extends ObjectType>(
           if (useNewContainer || !appWrapperElement) {
             // element will be destroyed after unmounted, we need to recreate it if it not exist
             // or we try to remount into a new container
-            appWrapperElement = createElement(appContent, strictStyleIsolation, scopedCSS, appInstanceId);
+            appWrapperElement = createElement(appContent, strictStyleIsolation, scopedCSS, appName);
             syncAppWrapperElement2Sandbox(appWrapperElement);
           }
 

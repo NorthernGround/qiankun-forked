@@ -99,20 +99,7 @@ qiankun 基于 single-spa，所以你可以在[这里](https://single-spa.js.org
 除了代码中暴露出相应的生命周期钩子之外，为了让主应用能正确识别微应用暴露出来的一些信息，微应用的打包工具需要增加如下配置：
 
 #### webpack:
-webpack v5:
-```js
-const packageName = require('./package.json').name;
 
-module.exports = {
-  output: {
-    library: `${packageName}-[name]`,
-    libraryTarget: 'umd',
-    chunkLoadingGlobal: `webpackJsonp_${packageName}`,
-  },
-};
-```
-
-webpack v4:
 ```js
 const packageName = require('./package.json').name;
 

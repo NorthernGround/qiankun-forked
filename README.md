@@ -8,8 +8,7 @@
   <a href="https://www.npmjs.com/package/qiankun"><img src="https://img.shields.io/npm/v/qiankun.svg?style=flat-square" alt="npm version" /></a>
   <a href="https://codecov.io/gh/umijs/qiankun"><img src="https://img.shields.io/codecov/c/github/umijs/qiankun.svg?style=flat-square" alt="coverage" /></a>
   <a href="https://www.npmjs.com/package/qiankun"><img src="https://img.shields.io/npm/dt/qiankun.svg?style=flat-square" alt="npm downloads" /></a>
-  <a href="https://github.com/umijs/qiankun/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/umijs/qiankun/ci.yml?branch=master&style=flat-square" alt="build status" /></a>
-  <a href="https://github.com/umijs/dumi"><img src="https://img.shields.io/badge/docs%20by-dumi-blue" alt="dumi" /></a>
+  <a href="https://travis-ci.com/umijs/qiankun"><img src="https://img.shields.io/github/workflow/status/umijs/qiankun/CI.svg?style=flat-square" alt="build status" /></a>
 </p>
 
 # qiankun（乾坤）
@@ -20,7 +19,7 @@ Qiankun enables you and your teams to build next-generation and enterprise-ready
 
 ## 🤔 Motivation
 
-A quick recap about the concept of `Micro Frontends`:
+A quick recap about the concept of 'Micro Frontends':
 
 > Techniques, strategies and recipes for building a **modern web app** with **multiple teams** using **different JavaScript frameworks**. — [Micro Frontends](https://micro-frontends.org/)
 
@@ -42,7 +41,7 @@ After solving these common problems of micro frontends and lots of polishing and
 
 Qiankun inherits many benefits from [single-spa](https://github.com/CanopyTax/single-spa):
 
-- 📦 **Micro-apps Independent Deployment**
+- 📦 **Micro-apps Independent Deployment** 
 - 🛴 **Lazy Load**
 - 📱 **Technology Agnostic**
 
@@ -50,7 +49,7 @@ And on top of these, it offers:
 
 - 💃 **Elegant API**
 - 💪 **HTML Entry Access Mode**
-- 🛡 **Style Isolation**
+- 🛡  **Style Isolation**
 - 🧳 **JS Sandbox**
 - ⚡ **Prefetch Assets**
 - 🔌 **[Umi Plugin](https://github.com/umijs/plugins/tree/master/packages/plugin-qiankun) Integration**
@@ -58,21 +57,23 @@ And on top of these, it offers:
 ## 📦 Installation
 
 ```shell
-$ yarn add qiankun  # or npm i qiankun
+$ yarn add qiankun  # or npm i qiankun -S
 ```
 
 ## 📖 Documentation
 
-You can find the Qiankun documentation [on the website](https://qiankun.umijs.org/)
+You can find the Qiankun documentation [on the website](https://qiankun.umijs.org/
+)
 
 Check out the [Getting Started](https://qiankun.umijs.org/guide/getting-started) page for a quick overview.
 
 The documentation is divided into several sections:
 
-- [Tutorial](https://qiankun.umijs.org/cookbook)
-- [API Reference](https://qiankun.umijs.org/api)
-- [FAQ](https://qiankun.umijs.org/faq)
-- [Community](https://qiankun.umijs.org/#-community)
+* [Tutorial](https://qiankun.umijs.org/cookbook)
+* [API Reference](https://qiankun.umijs.org/api)
+* [FAQ](https://qiankun.umijs.org/faq)
+* [Community](https://qiankun.umijs.org/#communit)
+
 
 ## 💿 Examples
 
@@ -95,23 +96,20 @@ Visit `http://localhost:7099`.
 
 ![](./examples/example.gif)
 
+
 ## 🎯 Roadmap
 
-See [Qiankun 3.0 Roadmap](https://github.com/umijs/qiankun/discussions/1378)
+- [x] Parcel apps integration (multiple micro-apps displayed at the same time, but only one uses router at most)
+- [x] Communication protocol between the framework and hosted micro-apps
+- [ ] Customizable side-effect hijacker
+- [ ] Nested micro-apps
 
-## 👥 Contributors
-
-Thanks to all the contributors!
-
-<a href="https://github.com/umijs/qiankun/graphs/contributors">
-  <img src="https://opencollective.com/qiankun/contributors.svg?width=960&button=false" alt="contributors" />
-</a>
 
 ## 🎁 Acknowledgements
 
 - [single-spa](https://github.com/CanopyTax/single-spa) What an awesome meta-framework for micro-frontends!
 - [import-html-entry](https://github.com/kuitos/import-html-entry/) An assets loader that supports html entry.
 
-## 📄 License
+### License
 
 Qiankun is [MIT licensed](./LICENSE).

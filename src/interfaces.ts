@@ -12,7 +12,6 @@ declare global {
     __INJECTED_PUBLIC_PATH_BY_QIANKUN__?: string;
     __QIANKUN_DEVELOPMENT__?: boolean;
     Zone?: CallableFunction;
-    __zone_symbol__setTimeout?: Window['setTimeout'];
   }
 }
 
@@ -76,10 +75,6 @@ type QiankunSpecialOpts = {
          * @deprecated We use strict mode by default
          */
         loose?: boolean;
-        /**
-         * use speed sandbox mode, enabled by default from 2.9.0
-         */
-        speedy?: boolean;
         patchers?: Patcher[];
       };
   /*
@@ -91,8 +86,6 @@ type QiankunSpecialOpts = {
    * skip some scripts or links intercept, like JSONP
    */
   excludeAssetFilter?: (url: string) => boolean;
-
-  globalContext?: typeof window;
 };
 export type FrameworkConfiguration = QiankunSpecialOpts & ImportEntryOpts & StartOpts;
 
@@ -131,7 +124,6 @@ export type SandBox = {
   sandboxRunning: boolean;
   /** latest set property */
   latestSetProp?: PropertyKey | null;
-  patchDocument: (doc: Document) => void;
   /** 启动沙箱 */
   active: () => void;
   /** 关闭沙箱 */
